@@ -123,3 +123,19 @@ def test_transcribe_resamples_wav_end_to_end(stub_or_real_model, write_wav):
     assert r.audio_s == pytest.approx(1.0, abs=0.01)
     assert r.text.strip()
     assert r.model == Path(stub_or_real_model).name  # the model file, not the audio
+
+
+@native_only
+@needs_model
+def test_zero_length_pcm_does_not_crash_native(stub_or_real_model):
+    # n_samples=0 reaching parakeet_capi_transcribe_pcm is the classic segfault
+    # input for a native engine. It must return a (possibly empty) Result or
+    # raise -- never take the process down. A crash here fails the whole run,
+    # which is the point.
+    with Model(stub_or_real_model) as m:
+        try:
+            r = m.transcribe_pcm(np.zeros(0, np.float32))
+        except (RuntimeError, ValueError):
+            return
+        assert isinstance(r, Result)
+        assert r.audio_s == 0.0

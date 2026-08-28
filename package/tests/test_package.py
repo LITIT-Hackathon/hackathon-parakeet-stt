@@ -3,12 +3,20 @@ two backend flags agree."""
 
 from __future__ import annotations
 
+from importlib.metadata import version as _dist_version
+
 import parakeet_stt
 
 
 def test_version_is_a_nonempty_string():
     assert isinstance(parakeet_stt.__version__, str)
     assert parakeet_stt.__version__
+
+
+def test_version_matches_package_metadata():
+    # __init__.__version__ and pyproject's version are two hand-maintained
+    # sources; guard against them drifting apart.
+    assert parakeet_stt.__version__ == _dist_version("parakeet-stt")
 
 
 def test_all_exports_are_importable():
