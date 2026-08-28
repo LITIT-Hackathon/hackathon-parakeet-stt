@@ -3,7 +3,7 @@
 Two tiers:
 
   - Stub tier: green with no model and no native build. Exercises the ENTIRE
-    Track B surface — audio, API, metrics contract, CLI — because the stub is a
+    Track B surface â€” audio, API, metrics contract, CLI â€” because the stub is a
     real compiled backend returning canned text. This is what proves Track B is
     done, independent of Track A.
 
@@ -28,10 +28,19 @@ from parakeet_stt import Model, Result, read_wav_mono
 from parakeet_stt.audio import AudioError
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tone_16k.wav"
+SPEECH = Path(__file__).parent / "fixtures" / "speech_en.wav"
 MODEL = os.environ.get("PARAKEET_MODEL")
 
 needs_model = pytest.mark.skipif(
     not MODEL, reason="set PARAKEET_MODEL to run the native tier"
+)
+
+# The stub ignores a model file's contents; the real engine validates it, so a
+# fabricated dummy .gguf loads under the stub and is (correctly) refused by
+# native. Tests that fabricate a model are therefore stub-only.
+stub_only = pytest.mark.skipif(
+    parakeet_stt.is_native(),
+    reason="stub-only: fabricated model file, native engine rejects it",
 )
 
 RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "load_ms"}
@@ -42,7 +51,7 @@ def stub_model(tmp_path):
     """A model file for the stub tier.
 
     The stub ignores the file's contents, but Model still checks the path
-    exists — exactly as the native backend requires — so stub and native behave
+    exists â€” exactly as the native backend requires â€” so stub and native behave
     identically here. A dummy file lets the full API and CLI run with no real
     checkpoint present.
     """
@@ -51,10 +60,10 @@ def stub_model(tmp_path):
     return str(p)
 
 
-def _cli(*args):
+def _cli(*args, env=None):
     return subprocess.run(
         [sys.executable, "-m", "parakeet_stt.cli", *args],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
 
 
@@ -100,6 +109,7 @@ def test_extension_imports():
 
 # -- API + metrics contract --------------------------------------------------
 
+@stub_only
 def test_transcribe_returns_full_contract(stub_model):
     with Model(stub_model) as m:
         r = m.transcribe(FIXTURE)
@@ -113,6 +123,7 @@ def test_transcribe_returns_full_contract(stub_model):
     assert r.backend == parakeet_stt.backend_name()
 
 
+@stub_only
 def test_transcribe_pcm_path(stub_model):
     samples, rate = read_wav_mono(FIXTURE)
     with Model(stub_model) as m:
@@ -136,6 +147,7 @@ def test_cli_info_runs():
     assert "native" in payload
 
 
+@stub_only
 def test_cli_transcribe_json(stub_model):
     out = _cli("transcribe", str(FIXTURE), "-m", stub_model, "--json")
     assert out.returncode == 0, out.stderr
@@ -144,6 +156,7 @@ def test_cli_transcribe_json(stub_model):
     assert payload["text"].strip()
 
 
+@stub_only
 def test_cli_transcript_to_stdout_metrics_to_stderr(stub_model):
     # The contract that lets `parakeet transcribe a.wav -m m > out.txt` yield a
     # clean transcript file while metrics stay on the terminal.
@@ -154,7 +167,11 @@ def test_cli_transcript_to_stdout_metrics_to_stderr(stub_model):
 
 
 def test_cli_missing_model_errors():
-    out = _cli("transcribe", str(FIXTURE))      # no -m, no env
+    # Run with PARAKEET_MODEL scrubbed from the child env, so "no model" is
+    # actually the condition under test even when the suite is run natively
+    # with the env var set.
+    env = {k: v for k, v in os.environ.items() if k != "PARAKEET_MODEL"}
+    out = _cli("transcribe", str(FIXTURE), env=env)   # no -m, no env model
     assert out.returncode == 2
     assert "model" in out.stderr.lower()
 
@@ -164,7 +181,7 @@ def test_cli_missing_model_errors():
 @needs_model
 def test_native_returns_text_and_metrics():
     with Model(MODEL) as m:
-        r = m.transcribe(FIXTURE)
+        r = m.transcribe(SPEECH)
     assert r.text.strip()
     assert r.rtf > 0
     assert r.backend == parakeet_stt.backend_name()
@@ -174,10 +191,9 @@ def test_native_returns_text_and_metrics():
 @pytest.mark.skipif(not parakeet_stt.is_native(), reason="stub returns canned text")
 def test_native_transcript_is_plausible():
     """Guards the 16 kHz trap: a rate mismatch still returns text, but garbage.
-    Set PARAKEET_EXPECT to a word you know is in the fixture audio."""
-    expect = os.environ.get("PARAKEET_EXPECT")
-    if not expect:
-        pytest.skip("set PARAKEET_EXPECT to assert on transcript content")
+    PARAKEET_EXPECT overrides the expected word (default: a word from
+    speech_en.wav)."""
+    expect = os.environ.get("PARAKEET_EXPECT", "portrait")
     with Model(MODEL) as m:
-        r = m.transcribe(FIXTURE)
+        r = m.transcribe(SPEECH)
     assert expect.lower() in r.text.lower()
