@@ -44,6 +44,14 @@ cmake --build "$B" -j
 echo ">> linking shared libparakeet.so into $OUT"
 mkdir -p "$OUT"
 cp -a "$B"/third_party/ggml/src/libggml*.so* "$OUT/"
+# Fail loud if the glob matched nothing: otherwise libparakeet.so links fine but
+# ggml is unresolved at import time (a much more confusing failure, later).
+n_ggml=$(ls "$OUT"/libggml*.so* 2>/dev/null | wc -l)
+[ "$n_ggml" -ge 3 ] || {
+  echo "ERROR: expected >=3 ggml libraries in $OUT, found $n_ggml." >&2
+  echo "       Check $B/third_party/ggml/src -- the layout may have changed." >&2
+  exit 1
+}
 g++ -shared -fPIC -o "$OUT/libparakeet.so" \
   -Wl,--whole-archive "$B/libparakeet.a" -Wl,--no-whole-archive \
   -L"$OUT" -lggml -lggml-cpu -lggml-base \
