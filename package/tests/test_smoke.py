@@ -169,34 +169,8 @@ def test_cli_transcript_to_stdout_metrics_to_stderr(model_audio):
     assert "RTF" in out.stderr                   # metrics on stderr
 
 
-def _clean_env():
-    return {k: v for k, v in os.environ.items() if k != "PARAKEET_MODEL"}
-
-
-def test_cli_unresolvable_model_errors():
-    # A name that is neither a registry entry nor an existing file: treated as a
-    # path and reported missing.
-    out = _cli("transcribe", str(TONE), "-m", "no-such-model", env=_clean_env())
-    assert out.returncode == 2
-    assert "not found" in out.stderr.lower()
-
-
-def test_cli_empty_model_errors():
-    out = _cli("transcribe", str(TONE), "-m", "", env=_clean_env())
-    assert out.returncode == 2
-    assert "model" in out.stderr.lower()
-
-
-def test_cli_download_unknown_model_errors():
-    out = _cli("download-model", "no-such-model", env=_clean_env())
-    assert out.returncode == 3
-    assert "unknown model" in out.stderr.lower()
-
-
-def test_cli_list_models():
-    out = _cli("list-models", env=_clean_env())
-    assert out.returncode == 0
-    assert "parakeet-tdt-0.6b-v3" in out.stdout
+# CLI model-resolution paths (unknown / empty / download-model / list-models)
+# live in test_cli.py.
 
 
 # ===================== native tier: real transcript content =================
