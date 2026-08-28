@@ -10,7 +10,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
-dependencies = ["numpy>=1.24"]
+dependencies = [
+    "numpy>=1.24",
+    "platformdirs>=4",
+    "tqdm>=4.60",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
