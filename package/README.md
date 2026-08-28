@@ -1,5 +1,7 @@
 # parakeet-stt
 
+[![package CI](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml/badge.svg?branch=track-b-package)](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml)
+
 Local speech-to-text on NVIDIA Parakeet with a native C++ inference core,
 exposed as an installable Python package with a CLI.
 

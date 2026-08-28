@@ -1,0 +1,75 @@
+name: package CI
+
+# Track B's safety net. Runs the stub-tier suite on every push and PR that
+# touches the package, so drift between the two tracks surfaces here rather than
+# at converge. The stub backend compiles a real pybind11 extension, so this also
+# proves `pip install` works from a clean checkout on a machine that is not ours.
+
+on:
+  push:
+    paths:
+      - "package/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "package/**"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: package
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false          # Track B needs no model weights
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build and install (compiles the stub extension)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[test]'
+
+      - name: Show backend
+        run: parakeet info
+
+      - name: Test
+        run: pytest -q
+
+  clean-room:
+    # The reproducibility deliverable, checked the way a judge would: clone
+    # fresh, follow the README, from a directory that has never seen the source.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          path: src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Reproduce from a clean clone
+        working-directory: ${{ github.workspace }}
+        run: |
+          cp -r src/package /tmp/clean
+          cd /tmp/clean
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -e '.[test]'
+          pytest -q
+          printf 'stub' > /tmp/m.gguf
+          parakeet transcribe tests/fixtures/tone_16k.wav -m /tmp/m.gguf --json
