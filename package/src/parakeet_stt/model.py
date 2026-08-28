@@ -14,6 +14,7 @@ import numpy as np
 
 from . import _core
 from .audio import TARGET_SAMPLE_RATE, duration_seconds, read_wav_mono
+from .models import DEFAULT_MODEL, resolve
 
 
 @dataclass(frozen=True)
@@ -41,12 +42,15 @@ class Model:
     close(), to release the native handle deterministically.
     """
 
-    model_path: str | Path
+    model_path: str | Path = DEFAULT_MODEL
+    download: bool = True
     _backend: _core.Backend = field(init=False, repr=False)
     load_ms: float = field(init=False, default=0.0)
 
     def __post_init__(self) -> None:
-        path = Path(self.model_path)
+        # A registry name resolves to a cached file, fetched on first use unless
+        # download=False; a filesystem path is taken as-is.
+        path = resolve(self.model_path, download=self.download)
         if not path.is_file():
             raise FileNotFoundError(f"model not found: {path}")
         t0 = time.perf_counter()

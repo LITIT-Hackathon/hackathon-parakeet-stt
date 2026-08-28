@@ -22,7 +22,8 @@ Needs a C++17 compiler, CMake ≥ 3.20, and (on the first build) network access.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install .
-parakeet info          # -> "backend": "parakeet.cpp", "native": true
+parakeet download-model       # ~940 MB into a local cache, once
+parakeet transcribe audio.wav
 ```
 
 `pip install` fetches `parakeet.cpp` at a pinned commit and compiles it straight
@@ -30,7 +31,8 @@ into the extension — no extra scripts, no separate shared object, everything
 static-linked into one `_core` module. First build compiles the engine
 (parakeet.cpp + ggml); rebuilds reuse the CMake cache.
 
-You still need a model — see [Model](#model).
+`parakeet transcribe` downloads the default model on first use if it is not
+already cached, so `download-model` is optional — see [Model](#model).
 
 ### Build knobs
 
@@ -52,18 +54,33 @@ The same Python surface sits on two backends, chosen at build time:
 
 ## Model
 
-`pip install` does not ship a model. Point `-m` / `PARAKEET_MODEL` at a GGUF
-that loads on the pinned `parakeet.cpp`.
+`pip install` does not ship weights. A model is referenced by a short name and
+fetched into a local cache (`platformdirs` cache dir, or `PARAKEET_CACHE_DIR`)
+on first use, with its SHA-256 checked.
+
+```bash
+parakeet list-models
+parakeet download-model                 # the default, parakeet-tdt-0.6b-v3
+parakeet transcribe a.wav               # downloads on first use if needed
+parakeet transcribe a.wav -m ~/my.gguf  # or point at a local file
+```
+
+```python
+Model()                      # default model, cached on first use
+Model("parakeet-tdt-0.6b-v3")  # same, by name
+Model("/path/to/model.gguf")   # explicit file, no download
+```
 
 > The `parakeet-tdt-0.6b-v3.q8_0.gguf` committed at the repo root is NVIDIA's
 > upstream GGUF; parakeet.cpp's GGUF schema has moved since, so it does **not**
-> load on the pinned build.
+> load on the pinned build. The registry points at a converted copy.
 
-`scripts/build_model.sh` regenerates a matching GGUF from the **provided**
-`parakeet-tdt-0.6b-v3.nemo` (same weights, converter and runtime in lockstep).
-It is self-contained: it fetches `parakeet.cpp` at the same pinned commit for
-the converter, and verifies the result by loading it through the installed
-`parakeet_stt`, so it needs nothing from `pip install` beyond the package itself.
+### Regenerating the model
+
+`scripts/build_model.sh` produces the registry's GGUF from the **provided**
+`parakeet-tdt-0.6b-v3.nemo` (same weights; converter and runtime pinned to the
+same commit). Self-contained: it fetches `parakeet.cpp` for the converter and
+verifies the result by loading it through the installed `parakeet_stt`.
 
 ```bash
 git lfs pull --include='parakeet-tdt-0.6b-v3.nemo'
@@ -71,9 +88,8 @@ scripts/build_model.sh ../parakeet-tdt-0.6b-v3.nemo ~/parakeet-v3-q8.gguf
 PARAKEET_MODEL=~/parakeet-v3-q8.gguf parakeet transcribe audio.wav
 ```
 
-The conversion pulls the NeMo/torch toolchain (large, one-off). A hosted,
-ready-to-use GGUF and a `parakeet download-model` command are the next step;
-until then this script is the path.
+The conversion pulls the NeMo/torch toolchain (large, one-off). Only whoever
+publishes the release asset runs this; users get the cached download.
 
 ### Offline install
 

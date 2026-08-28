@@ -169,13 +169,8 @@ def test_cli_transcript_to_stdout_metrics_to_stderr(model_audio):
     assert "RTF" in out.stderr                   # metrics on stderr
 
 
-def test_cli_missing_model_errors():
-    # Scrub PARAKEET_MODEL from the child env so "no model" is actually the
-    # condition under test even when the suite is run natively with it set.
-    env = {k: v for k, v in os.environ.items() if k != "PARAKEET_MODEL"}
-    out = _cli("transcribe", str(TONE), env=env)   # no -m, no env model
-    assert out.returncode == 2
-    assert "model" in out.stderr.lower()
+# CLI model-resolution paths (unknown / empty / download-model / list-models)
+# live in test_cli.py.
 
 
 # ===================== native tier: real transcript content =================

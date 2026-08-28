@@ -45,17 +45,36 @@ def test_info_reports_backend_and_native():
     assert "version" in payload and "python" in payload
 
 
-def test_transcribe_without_model_returns_2():
-    env = {k: v for k, v in os.environ.items() if k != "PARAKEET_MODEL"}
-    out = _cli("transcribe", str(TONE), env=env)
-    assert out.returncode == 2
-    assert "model" in out.stderr.lower()
-
-
 def test_transcribe_requires_the_audio_argument():
     out = _cli("transcribe")                   # missing the required positional
     assert out.returncode == 2                 # argparse usage error
     assert out.stderr.strip()
+
+
+def test_transcribe_unknown_model_name_returns_2():
+    # A name that is neither a registry entry nor a file is reported missing.
+    # -m is explicit, so this is independent of $PARAKEET_MODEL.
+    out = _cli("transcribe", str(TONE), "-m", "no-such-model")
+    assert out.returncode == 2
+    assert "not found" in out.stderr.lower()
+
+
+def test_transcribe_empty_model_returns_2():
+    out = _cli("transcribe", str(TONE), "-m", "")
+    assert out.returncode == 2
+    assert "model" in out.stderr.lower()
+
+
+def test_download_unknown_model_returns_3():
+    out = _cli("download-model", "no-such-model")   # fails before any network
+    assert out.returncode == 3
+    assert "unknown model" in out.stderr.lower()
+
+
+def test_list_models_includes_the_default():
+    out = _cli("list-models")
+    assert out.returncode == 0
+    assert parakeet_stt.DEFAULT_MODEL in out.stdout
 
 
 # -- transcription paths (both tiers via model_and_audio) --------------------
