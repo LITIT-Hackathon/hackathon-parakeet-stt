@@ -62,7 +62,7 @@ class Model:
         audio_s = duration_seconds(samples, sample_rate)
 
         t0 = time.perf_counter()
-        text = self._backend.transcribe_pcm(samples.tolist(), sample_rate)
+        text = self._backend.transcribe_pcm(samples, sample_rate)
         latency_s = time.perf_counter() - t0
 
         return self._result(text, audio_s, latency_s, Path(wav_path).name)
@@ -78,7 +78,7 @@ class Model:
         audio_s = duration_seconds(arr, sample_rate)
 
         t0 = time.perf_counter()
-        text = self._backend.transcribe_pcm(arr.tolist(), sample_rate)
+        text = self._backend.transcribe_pcm(arr, sample_rate)
         latency_s = time.perf_counter() - t0
 
         return self._result(text, audio_s, latency_s, "<pcm>")

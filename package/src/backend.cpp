@@ -9,12 +9,11 @@
 // package before the native engine lands. Both expose the identical Python
 // surface, so switching is a CMake flag, never a code change upstream of here.
 
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #ifdef PARAKEET_NATIVE
 extern "C" {
@@ -70,15 +69,22 @@ public:
 #endif
     }
 
-    // Transcribe mono float32 PCM in [-1, 1].
-    std::string transcribe_pcm(const std::vector<float>& pcm, int sample_rate) {
+    // Transcribe mono float32 PCM in [-1, 1]. The array is taken by buffer,
+    // c_style + forcecast, so a contiguous float32 numpy array passes straight
+    // through with no copy; anything else is coerced once by pybind rather than
+    // round-tripped through a Python list.
+    std::string transcribe_pcm(
+        py::array_t<float, py::array::c_style | py::array::forcecast> pcm,
+        int sample_rate) {
 #ifdef PARAKEET_NATIVE
         require_open();
+        py::buffer_info buf = pcm.request();   // touches Python, before the release
+        const float* data = static_cast<const float*>(buf.ptr);
+        const int n = static_cast<int>(buf.size);
         char* out = nullptr;
         {
             py::gil_scoped_release release;
-            out = parakeet_capi_transcribe_pcm(
-                ctx_, pcm.data(), static_cast<int>(pcm.size()), sample_rate, 0);
+            out = parakeet_capi_transcribe_pcm(ctx_, data, n, sample_rate, 0);
         }
         return take(out);
 #else
@@ -127,7 +133,7 @@ private:
 #else
     static std::string stub_text() {
         return "[stub backend] the package is wired end to end; "
-               "rebuild with PARAKEET_ROOT and PARAKEET_LIB for real inference";
+               "reinstall without PARAKEET_STT_BUNDLED=OFF for real inference";
     }
 #endif
 };

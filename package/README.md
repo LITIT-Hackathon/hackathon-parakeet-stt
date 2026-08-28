@@ -1,6 +1,6 @@
 # parakeet-stt
 
-[![package CI](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml/badge.svg?branch=track-b-package)](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml)
+[![package CI](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml/badge.svg)](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml)
 
 Local speech-to-text on NVIDIA Parakeet with a native C++ inference core,
 exposed as an installable Python package with a CLI.
@@ -37,7 +37,7 @@ You still need a model — see [Model](#model).
 | `pip install . --config-settings=cmake.define.<X>` | effect |
 |---|---|
 | `PARAKEET_STT_BUNDLED=OFF` | build the canned-text **stub** instead (offline, CI-fast, no engine compile) |
-| `PARAKEET_STT_MARCH_NATIVE=OFF` | portable build — drop `-march=native` (needed for a redistributable wheel) |
+| `PARAKEET_STT_MARCH_NATIVE=ON` | let ggml use `-march=native` (~30% faster); off by default so the build stays portable |
 | `PARAKEET_STT_GIT_TAG=<sha>` | vendor a different `parakeet.cpp` commit |
 | `FETCHCONTENT_SOURCE_DIR_PARAKEET_CPP=<path>` | use a local `parakeet.cpp` checkout, skip the clone (offline) |
 
@@ -60,7 +60,10 @@ that loads on the pinned `parakeet.cpp`.
 > load on the pinned build.
 
 `scripts/build_model.sh` regenerates a matching GGUF from the **provided**
-`parakeet-tdt-0.6b-v3.nemo` (same weights, converter and runtime in lockstep):
+`parakeet-tdt-0.6b-v3.nemo` (same weights, converter and runtime in lockstep).
+It is self-contained: it fetches `parakeet.cpp` at the same pinned commit for
+the converter, and verifies the result by loading it through the installed
+`parakeet_stt`, so it needs nothing from `pip install` beyond the package itself.
 
 ```bash
 git lfs pull --include='parakeet-tdt-0.6b-v3.nemo'
@@ -68,10 +71,21 @@ scripts/build_model.sh ../parakeet-tdt-0.6b-v3.nemo ~/parakeet-v3-q8.gguf
 PARAKEET_MODEL=~/parakeet-v3-q8.gguf parakeet transcribe audio.wav
 ```
 
-The conversion pulls the NeMo/torch toolchain (large, one-off). The legacy
-`scripts/build_native_lib.sh` + `scripts/wire_native.sh` — building the engine
-as a standalone shared library and wiring it in after — still work and are kept
-for hacking on the engine, but `pip install` no longer needs them.
+The conversion pulls the NeMo/torch toolchain (large, one-off). A hosted,
+ready-to-use GGUF and a `parakeet download-model` command are the next step;
+until then this script is the path.
+
+### Offline install
+
+`pip install` needs network once, to fetch `parakeet.cpp`. To build with no
+network, clone it yourself and point the build at the checkout:
+
+```bash
+git clone https://github.com/mudler/parakeet.cpp && \
+  git -C parakeet.cpp checkout e75de9b6b9b688fd293aa22f7e27aa724ea286f8 && \
+  git -C parakeet.cpp submodule update --init --recursive
+pip install . --config-settings=cmake.define.FETCHCONTENT_SOURCE_DIR_PARAKEET_CPP="$PWD/parakeet.cpp"
+```
 
 ## Use
 

@@ -19,13 +19,15 @@ find_package(pybind11 CONFIG REQUIRED)
 #   -DPARAKEET_STT_BUNDLED=OFF     build the canned-text stub instead
 #                                  (offline, CI-fast, no compiler for the engine)
 #   -DPARAKEET_STT_GIT_TAG=<sha>   vendor a different parakeet.cpp commit
-#   -DPARAKEET_STT_MARCH_NATIVE=OFF portable build (for redistributable wheels;
-#                                  the default bakes in -march=native)
+#   -DPARAKEET_STT_MARCH_NATIVE=ON  let ggml use -march=native (~30% faster, per
+#                                  parakeet.cpp's own notes). Off by default so
+#                                  the build is portable; only safe when the
+#                                  install runs on the machine it was built on.
 #   -DFETCHCONTENT_SOURCE_DIR_PARAKEET_CPP=<path>
 #                                  use a local parakeet.cpp checkout, skip the clone
 # ---------------------------------------------------------------------------
 option(PARAKEET_STT_BUNDLED "Fetch and build parakeet.cpp into the extension" ON)
-option(PARAKEET_STT_MARCH_NATIVE "Let ggml optimise for the build CPU (-march=native)" ON)
+option(PARAKEET_STT_MARCH_NATIVE "Let ggml optimise for the build CPU (-march=native)" OFF)
 set(PARAKEET_STT_GIT_TAG "e75de9b6b9b688fd293aa22f7e27aa724ea286f8"
     CACHE STRING "parakeet.cpp commit to vendor")
 
@@ -45,12 +47,9 @@ if(PARAKEET_STT_BUNDLED)
   set(GGML_BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
   set(GGML_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
 
-  # ggml forces GGML_NATIVE ON (-march=native) unless told otherwise. Fine for a
-  # build-where-you-run install; a wheel meant to ship must set this OFF or it
-  # will SIGILL on older CPUs.
-  if(NOT PARAKEET_STT_MARCH_NATIVE)
-    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-  endif()
+  # ggml would otherwise force GGML_NATIVE ON (-march=native), which SIGILLs if
+  # the build ever moves to an older CPU. Tie it to our opt-in flag instead.
+  set(GGML_NATIVE ${PARAKEET_STT_MARCH_NATIVE} CACHE BOOL "" FORCE)
 
   FetchContent_Declare(
     parakeet_cpp
