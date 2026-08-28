@@ -2,12 +2,12 @@
 //
 // Two builds come out of this one file:
 //
-//   stub    (default)          compiles and returns canned text
-//   native  (-DPARAKEET_NATIVE) calls parakeet.cpp's flat C-API
+//   native  (-DPARAKEET_NATIVE, default)  calls parakeet.cpp's flat C-API
+//   stub    (PARAKEET_STT_BUNDLED=OFF)    compiles and returns canned text
 //
-// The stub exists so Track B can build, install, test and demo the whole
-// package before the native engine lands. Both expose the identical Python
-// surface, so switching is a CMake flag, never a code change upstream of here.
+// The stub lets the package build, install, test and demo with no engine and
+// no model. Both expose the identical Python surface, so switching is a CMake
+// flag, never a code change upstream of here.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -133,7 +133,7 @@ private:
 #else
     static std::string stub_text() {
         return "[stub backend] the package is wired end to end; "
-               "reinstall without PARAKEET_STT_BUNDLED=OFF for real inference";
+               "reinstall with the default bundled build for real inference";
     }
 #endif
 };

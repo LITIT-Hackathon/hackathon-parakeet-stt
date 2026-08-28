@@ -8,7 +8,7 @@ exposed as an installable Python package with a CLI.
 ```python
 from parakeet_stt import Model
 
-with Model("parakeet-tdt-0.6b-v3.gguf") as m:
+with Model("parakeet-v3-q8.gguf") as m:        # see Model, below
     result = m.transcribe("audio.wav")
 
 print(result.text)
@@ -91,13 +91,13 @@ pip install . --config-settings=cmake.define.FETCHCONTENT_SOURCE_DIR_PARAKEET_CP
 
 ```bash
 # transcript to stdout, metrics to stderr
-parakeet transcribe audio.wav -m parakeet-tdt-0.6b-v3.gguf
+parakeet transcribe audio.wav -m ~/parakeet-v3-q8.gguf
 
 # full result as JSON
-parakeet transcribe audio.wav -m model.gguf --json
+parakeet transcribe audio.wav -m ~/parakeet-v3-q8.gguf --json
 
 # model path from the environment
-export PARAKEET_MODEL=parakeet-tdt-0.6b-v3.gguf
+export PARAKEET_MODEL=~/parakeet-v3-q8.gguf
 parakeet transcribe audio.wav
 ```
 
@@ -125,7 +125,8 @@ so pin threads (4-8) or take finals on the target hardware.
 
 Thread-pinned, end-to-end (mel + encoder + decode); the one-off model load
 (~0.41 s) is measured separately and excluded. `q8_0` model, GCP
-`n2-standard-16` (Cascade Lake), via `parakeet-cli bench`.
+`n2-standard-16` (Cascade Lake), via `parakeet-cli bench` from a standalone
+`parakeet.cpp` build (the bundled install does not build the CLI).
 
 | threads | RTF, English (7.4 s) | RTF, German (12 s) |
 |--------:|:--------------------:|:------------------:|
@@ -143,14 +144,14 @@ number, since a many-core box flatters it.
 
 ```bash
 pip install -e '.[test]'
-pytest                                    # audio + packaging tests, stub backend
-PARAKEET_MODEL=model.gguf pytest          # adds real end-to-end inference
+pytest                                    # native build; model-dependent tests skip
+PARAKEET_MODEL=~/parakeet-v3-q8.gguf pytest   # runs the full native tier
 ```
 
 ## Reproduce from a clean clone
 
 ```bash
-git clone <url> && cd parakeet-stt
+git clone <repo-url> && cd hackathon-parakeet-stt/package
 python -m venv .venv && . .venv/bin/activate
 pip install -e '.[test]'
 pytest
