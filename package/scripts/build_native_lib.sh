@@ -18,10 +18,19 @@ set -Eeuo pipefail
 ROOT="${1:-$HOME/parakeet.cpp}"
 OUT="${2:-$ROOT/native}"
 
+# Pin to the exact commit this package was validated against. parakeet.cpp's
+# GGUF schema drifts on master -- the provided .gguf already fails to load on a
+# newer build -- so pinning keeps the converter and the runtime in lockstep.
+PARAKEET_SHA="e75de9b6b9b688fd293aa22f7e27aa724ea286f8"
+
 if [ ! -d "$ROOT" ]; then
   echo ">> cloning parakeet.cpp into $ROOT"
   git clone --recursive https://github.com/mudler/parakeet.cpp "$ROOT"
 fi
+echo ">> pinning parakeet.cpp to $PARAKEET_SHA"
+git -C "$ROOT" fetch --quiet origin
+git -C "$ROOT" checkout --quiet "$PARAKEET_SHA"
+git -C "$ROOT" submodule update --init --recursive --quiet
 
 B="$ROOT/build-pic"
 echo ">> configuring (PIC) in $B"

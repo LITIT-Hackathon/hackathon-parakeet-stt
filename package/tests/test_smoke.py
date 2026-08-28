@@ -3,12 +3,16 @@
 Two tiers:
 
   - Stub tier: green with no model and no native build. Exercises the ENTIRE
-    Track B surface â€” audio, API, metrics contract, CLI â€” because the stub is a
+    Track B surface — audio, API, metrics contract, CLI — because the stub is a
     real compiled backend returning canned text. This is what proves Track B is
     done, independent of Track A.
 
-  - Native tier: gated behind PARAKEET_MODEL. The same shape plus real
-    inference, run once Track A's engine is wired in.
+  - Native tier: gated behind PARAKEET_MODEL. Real inference through
+    parakeet.cpp.
+
+The contract, transcribe_pcm and CLI tests run under BOTH tiers via the
+`model_audio` fixture, so the Result shape and the CLI are asserted against real
+inference too, not only against the stub's canned text.
 """
 
 from __future__ import annotations
@@ -27,37 +31,38 @@ import parakeet_stt
 from parakeet_stt import Model, Result, read_wav_mono
 from parakeet_stt.audio import AudioError
 
-FIXTURE = Path(__file__).parent / "fixtures" / "tone_16k.wav"
-SPEECH = Path(__file__).parent / "fixtures" / "speech_en.wav"
+FIXTURES = Path(__file__).parent / "fixtures"
+TONE = FIXTURES / "tone_16k.wav"
+SPEECH_EN = FIXTURES / "speech_en.wav"
+SPEECH_DE = FIXTURES / "speech_de.wav"
+
 MODEL = os.environ.get("PARAKEET_MODEL")
+NATIVE = parakeet_stt.is_native()
 
 needs_model = pytest.mark.skipif(
     not MODEL, reason="set PARAKEET_MODEL to run the native tier"
 )
-
-# The stub ignores a model file's contents; the real engine validates it, so a
-# fabricated dummy .gguf loads under the stub and is (correctly) refused by
-# native. Tests that fabricate a model are therefore stub-only.
-stub_only = pytest.mark.skipif(
-    parakeet_stt.is_native(),
-    reason="stub-only: fabricated model file, native engine rejects it",
-)
+native_only = pytest.mark.skipif(not NATIVE, reason="native backend only")
 
 RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "load_ms"}
 
 
 @pytest.fixture
-def stub_model(tmp_path):
-    """A model file for the stub tier.
+def model_audio(tmp_path):
+    """(model_path, audio_path) for whichever backend is compiled in.
 
-    The stub ignores the file's contents, but Model still checks the path
-    exists â€” exactly as the native backend requires â€” so stub and native behave
-    identically here. A dummy file lets the full API and CLI run with no real
-    checkpoint present.
+    Native: the real model from PARAKEET_MODEL on real speech, so the metrics
+    contract and CLI are exercised against actual inference. Stub: a fabricated
+    model file the stub accepts, on the tone fixture. The same assertions hold
+    for both, which is the point — one contract, two backends.
     """
+    if NATIVE:
+        if not MODEL:
+            pytest.skip("set PARAKEET_MODEL to run the native tier")
+        return MODEL, SPEECH_EN
     p = tmp_path / "stub-model.gguf"
     p.write_bytes(b"stub")
-    return str(p)
+    return str(p), TONE
 
 
 def _cli(*args, env=None):
@@ -67,12 +72,10 @@ def _cli(*args, env=None):
     )
 
 
-# ========================= stub tier: no model needed =======================
-
-# -- audio layer -------------------------------------------------------------
+# ============================ audio layer (no model) ========================
 
 def test_reads_fixture_as_16k_mono():
-    samples, rate = read_wav_mono(FIXTURE)
+    samples, rate = read_wav_mono(TONE)
     assert rate == 16_000
     assert samples.dtype == np.float32
     assert samples.ndim == 1
@@ -100,33 +103,33 @@ def test_missing_file_raises_clearly():
         read_wav_mono("does_not_exist.wav")
 
 
-# -- extension ---------------------------------------------------------------
+# ================================ extension =================================
 
 def test_extension_imports():
     assert parakeet_stt.backend_name() in {"stub", "parakeet.cpp"}
     assert isinstance(parakeet_stt.is_native(), bool)
 
 
-# -- API + metrics contract --------------------------------------------------
+# ===================== API + metrics contract (both tiers) ==================
 
-@stub_only
-def test_transcribe_returns_full_contract(stub_model):
-    with Model(stub_model) as m:
-        r = m.transcribe(FIXTURE)
+def test_transcribe_returns_full_contract(model_audio):
+    model, audio = model_audio
+    with Model(model) as m:
+        r = m.transcribe(audio)
 
     assert isinstance(r, Result)
     assert r.to_dict().keys() == RESULT_FIELDS
-    assert r.text.strip()                       # stub returns canned text
+    assert r.text.strip()                       # canned text (stub) or real transcript (native)
     assert isinstance(r.audio_s, float) and r.audio_s > 0
     assert isinstance(r.latency_ms, float) and r.latency_ms >= 0
     assert isinstance(r.rtf, float) and r.rtf >= 0
     assert r.backend == parakeet_stt.backend_name()
 
 
-@stub_only
-def test_transcribe_pcm_path(stub_model):
-    samples, rate = read_wav_mono(FIXTURE)
-    with Model(stub_model) as m:
+def test_transcribe_pcm_path(model_audio):
+    model, audio = model_audio
+    samples, rate = read_wav_mono(audio)
+    with Model(model) as m:
         r = m.transcribe_pcm(samples, rate)
     assert r.text.strip()
     assert r.audio_s > 0
@@ -137,7 +140,7 @@ def test_missing_model_raises(tmp_path):
         Model(str(tmp_path / "nope.gguf"))
 
 
-# -- CLI ---------------------------------------------------------------------
+# ==================================== CLI ===================================
 
 def test_cli_info_runs():
     out = _cli("info")
@@ -147,53 +150,51 @@ def test_cli_info_runs():
     assert "native" in payload
 
 
-@stub_only
-def test_cli_transcribe_json(stub_model):
-    out = _cli("transcribe", str(FIXTURE), "-m", stub_model, "--json")
+def test_cli_transcribe_json(model_audio):
+    model, audio = model_audio
+    out = _cli("transcribe", str(audio), "-m", model, "--json")
     assert out.returncode == 0, out.stderr
     payload = json.loads(out.stdout)
     assert payload.keys() == RESULT_FIELDS
     assert payload["text"].strip()
 
 
-@stub_only
-def test_cli_transcript_to_stdout_metrics_to_stderr(stub_model):
+def test_cli_transcript_to_stdout_metrics_to_stderr(model_audio):
     # The contract that lets `parakeet transcribe a.wav -m m > out.txt` yield a
     # clean transcript file while metrics stay on the terminal.
-    out = _cli("transcribe", str(FIXTURE), "-m", stub_model)
+    model, audio = model_audio
+    out = _cli("transcribe", str(audio), "-m", model)
     assert out.returncode == 0
     assert out.stdout.strip()                   # transcript on stdout
     assert "RTF" in out.stderr                   # metrics on stderr
 
 
 def test_cli_missing_model_errors():
-    # Run with PARAKEET_MODEL scrubbed from the child env, so "no model" is
-    # actually the condition under test even when the suite is run natively
-    # with the env var set.
+    # Scrub PARAKEET_MODEL from the child env so "no model" is actually the
+    # condition under test even when the suite is run natively with it set.
     env = {k: v for k, v in os.environ.items() if k != "PARAKEET_MODEL"}
-    out = _cli("transcribe", str(FIXTURE), env=env)   # no -m, no env model
+    out = _cli("transcribe", str(TONE), env=env)   # no -m, no env model
     assert out.returncode == 2
     assert "model" in out.stderr.lower()
 
 
-# ========================= native tier: needs a model =======================
+# ===================== native tier: real transcript content =================
 
 @needs_model
-def test_native_returns_text_and_metrics():
-    with Model(MODEL) as m:
-        r = m.transcribe(SPEECH)
-    assert r.text.strip()
-    assert r.rtf > 0
-    assert r.backend == parakeet_stt.backend_name()
-
-
-@needs_model
-@pytest.mark.skipif(not parakeet_stt.is_native(), reason="stub returns canned text")
-def test_native_transcript_is_plausible():
+@native_only
+def test_native_english_is_plausible():
     """Guards the 16 kHz trap: a rate mismatch still returns text, but garbage.
-    PARAKEET_EXPECT overrides the expected word (default: a word from
-    speech_en.wav)."""
-    expect = os.environ.get("PARAKEET_EXPECT", "portrait")
+    speech_en.wav is a public-domain reading; 'portrait' is in it."""
     with Model(MODEL) as m:
-        r = m.transcribe(SPEECH)
-    assert expect.lower() in r.text.lower()
+        r = m.transcribe(SPEECH_EN)
+    assert "portrait" in r.text.lower(), r.text
+
+
+@needs_model
+@native_only
+def test_native_german_is_plausible():
+    """Multilingual v3 on a real DW 'Langsam gesprochene Nachrichten' excerpt
+    (see tests/fixtures/NOTICE.md). One model, no per-language config."""
+    with Model(MODEL) as m:
+        r = m.transcribe(SPEECH_DE)
+    assert "sonnenfinsternis" in r.text.lower(), r.text
