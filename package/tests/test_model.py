@@ -109,3 +109,17 @@ def test_use_after_close_raises(stub_or_real_model):
     m.close()
     with pytest.raises(RuntimeError):
         m.transcribe_pcm(np.zeros(1600, np.float32))
+
+
+@stub_only
+def test_transcribe_resamples_wav_end_to_end(stub_or_real_model, write_wav):
+    # Model.transcribe reads and resamples the file before inference; a 44.1 kHz
+    # 1 s clip must report ~1 s of audio regardless of source rate. Exercises
+    # transcribe() + read_wav_mono + backend together (the native path is the
+    # smoke tier's job).
+    path = write_wav("in441.wav", np.zeros(44_100, np.int16), sample_rate=44_100)
+    with Model(stub_or_real_model) as m:
+        r = m.transcribe(path)
+    assert r.audio_s == pytest.approx(1.0, abs=0.01)
+    assert r.text.strip()
+    assert r.model == Path(stub_or_real_model).name  # the model file, not the audio

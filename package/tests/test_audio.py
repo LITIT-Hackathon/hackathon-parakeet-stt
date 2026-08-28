@@ -127,3 +127,13 @@ def test_resample_linear_length():
 def test_duration_seconds():
     assert duration_seconds(np.zeros(16_000, np.float32), 16_000) == pytest.approx(1.0)
     assert duration_seconds(np.zeros(0, np.float32), 16_000) == 0.0
+
+
+def test_resample_linear_preserves_endpoints():
+    # A ramp resampled down keeps its first and last value (linear interp), so a
+    # bug that shifts or truncates the signal shows up here, not just in length.
+    x = np.linspace(0.0, 1.0, 1000, dtype=np.float32)
+    out = _resample_linear(x, 32_000, 16_000)
+    assert len(out) == 500
+    assert out[0] == pytest.approx(0.0, abs=1e-6)
+    assert out[-1] == pytest.approx(1.0, abs=1e-3)

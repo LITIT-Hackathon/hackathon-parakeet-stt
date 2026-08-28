@@ -52,6 +52,12 @@ def test_transcribe_without_model_returns_2():
     assert "model" in out.stderr.lower()
 
 
+def test_transcribe_requires_the_audio_argument():
+    out = _cli("transcribe")                   # missing the required positional
+    assert out.returncode == 2                 # argparse usage error
+    assert out.stderr.strip()
+
+
 # -- transcription paths (both tiers via model_and_audio) --------------------
 
 def test_transcribe_missing_audio_returns_2(model_and_audio, tmp_path):
