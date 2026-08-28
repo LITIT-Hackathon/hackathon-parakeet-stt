@@ -106,6 +106,24 @@ Report RTF with the thread count and hardware stated. A number from a many-core
 cloud box is not the number a "lightweight local runtime" delivers on a laptop,
 so pin threads (4-8) or take finals on the target hardware.
 
+## Benchmark
+
+Thread-pinned, end-to-end (mel + encoder + decode); the one-off model load
+(~0.41 s) is measured separately and excluded. `q8_0` model, GCP
+`n2-standard-16` (Cascade Lake), via `parakeet-cli bench`.
+
+| threads | RTF, English (7.4 s) | RTF, German (12 s) |
+|--------:|:--------------------:|:------------------:|
+|       1 |         0.27         |        0.28        |
+|       2 |         0.15         |        0.15        |
+|       4 |        0.083         |       0.082        |
+|       8 |        0.049         |       0.048        |
+
+RTF is transcription time / audio duration; below 1.0 is faster than realtime.
+Even a single core runs ~3.6x faster than realtime, so this holds comfortably
+real-time on a laptop — pin threads (or state the hardware) when you quote a
+number, since a many-core box flatters it.
+
 ## Test
 
 ```bash
