@@ -17,60 +17,61 @@ print(result.rtf, result.latency_ms)      # runtime metrics come with the transc
 
 ## Install
 
-Building the extension needs a C++17 compiler and CMake. The package installs
-either against the real engine or against a built-in stub, decided at build
-time (see below).
+Needs a C++17 compiler, CMake ≥ 3.20, and (on the first build) network access.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install .
+parakeet info          # -> "backend": "parakeet.cpp", "native": true
 ```
 
-Verify the build:
+`pip install` fetches `parakeet.cpp` at a pinned commit and compiles it straight
+into the extension — no extra scripts, no separate shared object, everything
+static-linked into one `_core` module. First build compiles the engine
+(parakeet.cpp + ggml); rebuilds reuse the CMake cache.
 
-```bash
-parakeet info
-```
+You still need a model — see [Model](#model).
+
+### Build knobs
+
+| `pip install . --config-settings=cmake.define.<X>` | effect |
+|---|---|
+| `PARAKEET_STT_BUNDLED=OFF` | build the canned-text **stub** instead (offline, CI-fast, no engine compile) |
+| `PARAKEET_STT_MARCH_NATIVE=OFF` | portable build — drop `-march=native` (needed for a redistributable wheel) |
+| `PARAKEET_STT_GIT_TAG=<sha>` | vendor a different `parakeet.cpp` commit |
+| `FETCHCONTENT_SOURCE_DIR_PARAKEET_CPP=<path>` | use a local `parakeet.cpp` checkout, skip the clone (offline) |
 
 ## Backends
 
-The same Python surface sits on top of two backends:
+The same Python surface sits on two backends, chosen at build time:
 
-- **stub** (default) compiles and returns canned text. It exists so the whole
-  package, CLI, tests, and packaging work before the native engine is wired in.
-- **native** links `parakeet.cpp` and runs real inference.
+- **native** (default) — `parakeet.cpp` compiled in, real inference.
+- **stub** (`PARAKEET_STT_BUNDLED=OFF`) — compiles and returns canned text, so
+  the package, CLI, tests, and packaging can be exercised with no engine and no
+  model.
 
-### Build native from the provided model
+## Model
 
-Three scripts take a clean checkout to a working native install. Run them from
-`package/` (Linux; needs a C++17 compiler, CMake, and — for the conversion —
-enough disk for the NeMo/torch toolchain):
+`pip install` does not ship a model. Point `-m` / `PARAKEET_MODEL` at a GGUF
+that loads on the pinned `parakeet.cpp`.
+
+> The `parakeet-tdt-0.6b-v3.q8_0.gguf` committed at the repo root is NVIDIA's
+> upstream GGUF; parakeet.cpp's GGUF schema has moved since, so it does **not**
+> load on the pinned build.
+
+`scripts/build_model.sh` regenerates a matching GGUF from the **provided**
+`parakeet-tdt-0.6b-v3.nemo` (same weights, converter and runtime in lockstep):
 
 ```bash
-# 1. build parakeet.cpp at the pinned commit and link the shared library
-scripts/build_native_lib.sh ~/parakeet.cpp ~/parakeet.cpp/native
-
-# 2. convert the PROVIDED .nemo into a GGUF that loads on that build
-#    (first: git lfs pull --include='parakeet-tdt-0.6b-v3.nemo')
-scripts/build_model.sh ../parakeet-tdt-0.6b-v3.nemo ~/parakeet-v3-q8.gguf ~/parakeet.cpp
-
-# 3. reinstall the package against the native backend
-scripts/wire_native.sh ~/parakeet.cpp ~/parakeet.cpp/native/libparakeet.so
-
-parakeet info                 # -> "backend": "parakeet.cpp"
-PARAKEET_MODEL=~/parakeet-v3-q8.gguf pytest
+git lfs pull --include='parakeet-tdt-0.6b-v3.nemo'
+scripts/build_model.sh ../parakeet-tdt-0.6b-v3.nemo ~/parakeet-v3-q8.gguf
+PARAKEET_MODEL=~/parakeet-v3-q8.gguf parakeet transcribe audio.wav
 ```
 
-Under the hood step 3 is just `pip install .` with
-`--config-settings=cmake.define.PARAKEET_ROOT=… PARAKEET_LIB=…`; the script adds
-the rpath so the extension resolves the library at import.
-
-> **On the provided `.gguf`.** The `parakeet-tdt-0.6b-v3.q8_0.gguf` committed at
-> the repo root is NVIDIA's upstream GGUF. parakeet.cpp's GGUF schema has moved
-> since it was published, so it does **not** load on the pinned build.
-> `build_model.sh` regenerates a matching GGUF from the provided `.nemo` — same
-> weights, converter and runtime in lockstep — so point `-m` / `PARAKEET_MODEL`
-> at that regenerated file, not the committed one.
+The conversion pulls the NeMo/torch toolchain (large, one-off). The legacy
+`scripts/build_native_lib.sh` + `scripts/wire_native.sh` — building the engine
+as a standalone shared library and wiring it in after — still work and are kept
+for hacking on the engine, but `pip install` no longer needs them.
 
 ## Use
 
