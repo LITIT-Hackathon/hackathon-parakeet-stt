@@ -1,8 +1,14 @@
-"""Repeatable smoke test.
+"""Track B smoke test.
 
-Runs green on the stub backend with no model at all, so it is meaningful from
-the first commit. When PARAKEET_MODEL points at a real .gguf and the extension
-was built native, the same tests assert on real inference.
+Two tiers:
+
+  - Stub tier: green with no model and no native build. Exercises the ENTIRE
+    Track B surface — audio, API, metrics contract, CLI — because the stub is a
+    real compiled backend returning canned text. This is what proves Track B is
+    done, independent of Track A.
+
+  - Native tier: gated behind PARAKEET_MODEL. The same shape plus real
+    inference, run once Track A's engine is wired in.
 """
 
 from __future__ import annotations
@@ -18,18 +24,43 @@ import numpy as np
 import pytest
 
 import parakeet_stt
-from parakeet_stt import Model, read_wav_mono
+from parakeet_stt import Model, Result, read_wav_mono
 from parakeet_stt.audio import AudioError
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tone_16k.wav"
 MODEL = os.environ.get("PARAKEET_MODEL")
 
 needs_model = pytest.mark.skipif(
-    not MODEL, reason="set PARAKEET_MODEL to run against a real checkpoint"
+    not MODEL, reason="set PARAKEET_MODEL to run the native tier"
 )
 
+RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "load_ms"}
 
-# -- audio layer: no model or extension needed -------------------------------
+
+@pytest.fixture
+def stub_model(tmp_path):
+    """A model file for the stub tier.
+
+    The stub ignores the file's contents, but Model still checks the path
+    exists — exactly as the native backend requires — so stub and native behave
+    identically here. A dummy file lets the full API and CLI run with no real
+    checkpoint present.
+    """
+    p = tmp_path / "stub-model.gguf"
+    p.write_bytes(b"stub")
+    return str(p)
+
+
+def _cli(*args):
+    return subprocess.run(
+        [sys.executable, "-m", "parakeet_stt.cli", *args],
+        capture_output=True, text=True,
+    )
+
+
+# ========================= stub tier: no model needed =======================
+
+# -- audio layer -------------------------------------------------------------
 
 def test_reads_fixture_as_16k_mono():
     samples, rate = read_wav_mono(FIXTURE)
@@ -40,20 +71,19 @@ def test_reads_fixture_as_16k_mono():
 
 
 def test_resamples_and_downmixes(tmp_path):
-    # 44.1 kHz stereo in, 16 kHz mono out. This is the silent-failure path:
-    # if it ever regresses, transcripts degrade without raising.
+    # 44.1 kHz stereo in, 16 kHz mono out: the silent-failure path. If this
+    # regresses, transcripts degrade without any error being raised.
     path = tmp_path / "stereo_44k.wav"
-    n = 44_100
     with wave.open(str(path), "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(44_100)
-        w.writeframes((np.zeros(n * 2, dtype=np.int16)).tobytes())
+        w.writeframes(np.zeros(44_100 * 2, dtype=np.int16).tobytes())
 
     samples, rate = read_wav_mono(path)
     assert rate == 16_000
     assert samples.ndim == 1
-    assert abs(len(samples) - 16_000) < 50  # ~1s of audio, allowing rounding
+    assert abs(len(samples) - 16_000) < 50  # ~1s, allowing rounding
 
 
 def test_missing_file_raises_clearly():
@@ -61,44 +91,90 @@ def test_missing_file_raises_clearly():
         read_wav_mono("does_not_exist.wav")
 
 
-# -- extension: builds and imports -------------------------------------------
+# -- extension ---------------------------------------------------------------
 
 def test_extension_imports():
     assert parakeet_stt.backend_name() in {"stub", "parakeet.cpp"}
     assert isinstance(parakeet_stt.is_native(), bool)
 
 
-# -- end to end --------------------------------------------------------------
+# -- API + metrics contract --------------------------------------------------
 
-@needs_model
-def test_transcribe_returns_text_and_metrics():
-    with Model(MODEL) as m:
+def test_transcribe_returns_full_contract(stub_model):
+    with Model(stub_model) as m:
         r = m.transcribe(FIXTURE)
 
-    assert r.text.strip(), "transcript was empty"
-    assert r.audio_s > 0
-    assert r.latency_ms > 0
-    assert r.rtf > 0
+    assert isinstance(r, Result)
+    assert r.to_dict().keys() == RESULT_FIELDS
+    assert r.text.strip()                       # stub returns canned text
+    assert isinstance(r.audio_s, float) and r.audio_s > 0
+    assert isinstance(r.latency_ms, float) and r.latency_ms >= 0
+    assert isinstance(r.rtf, float) and r.rtf >= 0
     assert r.backend == parakeet_stt.backend_name()
-    assert set(r.to_dict()) >= {"text", "audio_s", "latency_ms", "rtf"}
 
+
+def test_transcribe_pcm_path(stub_model):
+    samples, rate = read_wav_mono(FIXTURE)
+    with Model(stub_model) as m:
+        r = m.transcribe_pcm(samples, rate)
+    assert r.text.strip()
+    assert r.audio_s > 0
+
+
+def test_missing_model_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        Model(str(tmp_path / "nope.gguf"))
+
+
+# -- CLI ---------------------------------------------------------------------
+
+def test_cli_info_runs():
+    out = _cli("info")
+    assert out.returncode == 0
+    payload = json.loads(out.stdout)
+    assert payload["backend"] in {"stub", "parakeet.cpp"}
+    assert "native" in payload
+
+
+def test_cli_transcribe_json(stub_model):
+    out = _cli("transcribe", str(FIXTURE), "-m", stub_model, "--json")
+    assert out.returncode == 0, out.stderr
+    payload = json.loads(out.stdout)
+    assert payload.keys() == RESULT_FIELDS
+    assert payload["text"].strip()
+
+
+def test_cli_transcript_to_stdout_metrics_to_stderr(stub_model):
+    # The contract that lets `parakeet transcribe a.wav -m m > out.txt` yield a
+    # clean transcript file while metrics stay on the terminal.
+    out = _cli("transcribe", str(FIXTURE), "-m", stub_model)
+    assert out.returncode == 0
+    assert out.stdout.strip()                   # transcript on stdout
+    assert "RTF" in out.stderr                   # metrics on stderr
+
+
+def test_cli_missing_model_errors():
+    out = _cli("transcribe", str(FIXTURE))      # no -m, no env
+    assert out.returncode == 2
+    assert "model" in out.stderr.lower()
+
+
+# ========================= native tier: needs a model =======================
 
 @needs_model
-def test_cli_json_output():
-    out = subprocess.run(
-        [sys.executable, "-m", "parakeet_stt.cli",
-         "transcribe", str(FIXTURE), "-m", MODEL, "--json"],
-        capture_output=True, text=True, check=True,
-    )
-    payload = json.loads(out.stdout)
-    assert "text" in payload and "rtf" in payload
+def test_native_returns_text_and_metrics():
+    with Model(MODEL) as m:
+        r = m.transcribe(FIXTURE)
+    assert r.text.strip()
+    assert r.rtf > 0
+    assert r.backend == parakeet_stt.backend_name()
 
 
 @needs_model
 @pytest.mark.skipif(not parakeet_stt.is_native(), reason="stub returns canned text")
 def test_native_transcript_is_plausible():
     """Guards the 16 kHz trap: a rate mismatch still returns text, but garbage.
-    Set PARAKEET_EXPECT to a word you know is in the fixture."""
+    Set PARAKEET_EXPECT to a word you know is in the fixture audio."""
     expect = os.environ.get("PARAKEET_EXPECT")
     if not expect:
         pytest.skip("set PARAKEET_EXPECT to assert on transcript content")
