@@ -1,0 +1,159 @@
+# parakeet-stt
+
+[![package CI](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml/badge.svg)](https://github.com/LITIT-Hackathon/hackathon-parakeet-stt/actions/workflows/ci.yml)
+
+Local speech-to-text on NVIDIA Parakeet with a native C++ inference core,
+exposed as an installable Python package with a CLI.
+
+```python
+from parakeet_stt import Model
+
+with Model("parakeet-v3-q8.gguf") as m:        # see Model, below
+    result = m.transcribe("audio.wav")
+
+print(result.text)
+print(result.rtf, result.latency_ms)      # runtime metrics come with the transcript
+```
+
+## Install
+
+Needs a C++17 compiler, CMake ≥ 3.20, and (on the first build) network access.
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install .
+parakeet info          # -> "backend": "parakeet.cpp", "native": true
+```
+
+`pip install` fetches `parakeet.cpp` at a pinned commit and compiles it straight
+into the extension — no extra scripts, no separate shared object, everything
+static-linked into one `_core` module. First build compiles the engine
+(parakeet.cpp + ggml); rebuilds reuse the CMake cache.
+
+You still need a model — see [Model](#model).
+
+### Build knobs
+
+| `pip install . --config-settings=cmake.define.<X>` | effect |
+|---|---|
+| `PARAKEET_STT_BUNDLED=OFF` | build the canned-text **stub** instead (offline, CI-fast, no engine compile) |
+| `PARAKEET_STT_MARCH_NATIVE=ON` | let ggml use `-march=native` (~30% faster); off by default so the build stays portable |
+| `PARAKEET_STT_GIT_TAG=<sha>` | vendor a different `parakeet.cpp` commit |
+| `FETCHCONTENT_SOURCE_DIR_PARAKEET_CPP=<path>` | use a local `parakeet.cpp` checkout, skip the clone (offline) |
+
+## Backends
+
+The same Python surface sits on two backends, chosen at build time:
+
+- **native** (default) — `parakeet.cpp` compiled in, real inference.
+- **stub** (`PARAKEET_STT_BUNDLED=OFF`) — compiles and returns canned text, so
+  the package, CLI, tests, and packaging can be exercised with no engine and no
+  model.
+
+## Model
+
+`pip install` does not ship a model. Point `-m` / `PARAKEET_MODEL` at a GGUF
+that loads on the pinned `parakeet.cpp`.
+
+> The `parakeet-tdt-0.6b-v3.q8_0.gguf` committed at the repo root is NVIDIA's
+> upstream GGUF; parakeet.cpp's GGUF schema has moved since, so it does **not**
+> load on the pinned build.
+
+`scripts/build_model.sh` regenerates a matching GGUF from the **provided**
+`parakeet-tdt-0.6b-v3.nemo` (same weights, converter and runtime in lockstep).
+It is self-contained: it fetches `parakeet.cpp` at the same pinned commit for
+the converter, and verifies the result by loading it through the installed
+`parakeet_stt`, so it needs nothing from `pip install` beyond the package itself.
+
+```bash
+git lfs pull --include='parakeet-tdt-0.6b-v3.nemo'
+scripts/build_model.sh ../parakeet-tdt-0.6b-v3.nemo ~/parakeet-v3-q8.gguf
+PARAKEET_MODEL=~/parakeet-v3-q8.gguf parakeet transcribe audio.wav
+```
+
+The conversion pulls the NeMo/torch toolchain (large, one-off). A hosted,
+ready-to-use GGUF and a `parakeet download-model` command are the next step;
+until then this script is the path.
+
+### Offline install
+
+`pip install` needs network once, to fetch `parakeet.cpp`. To build with no
+network, clone it yourself and point the build at the checkout:
+
+```bash
+git clone https://github.com/mudler/parakeet.cpp && \
+  git -C parakeet.cpp checkout e75de9b6b9b688fd293aa22f7e27aa724ea286f8 && \
+  git -C parakeet.cpp submodule update --init --recursive
+pip install . --config-settings=cmake.define.FETCHCONTENT_SOURCE_DIR_PARAKEET_CPP="$PWD/parakeet.cpp"
+```
+
+## Use
+
+```bash
+# transcript to stdout, metrics to stderr
+parakeet transcribe audio.wav -m ~/parakeet-v3-q8.gguf
+
+# full result as JSON
+parakeet transcribe audio.wav -m ~/parakeet-v3-q8.gguf --json
+
+# model path from the environment
+export PARAKEET_MODEL=~/parakeet-v3-q8.gguf
+parakeet transcribe audio.wav
+```
+
+Any sample rate or channel count is accepted; input is normalised to 16 kHz
+mono before inference. Feeding the wrong rate is the classic silent failure, so
+that conversion is done for you and not left to the caller.
+
+## Metrics
+
+Every `transcribe()` returns the transcript together with:
+
+| field | meaning |
+|---|---|
+| `audio_s` | length of the input audio in seconds |
+| `latency_ms` | wall clock for the transcription call alone |
+| `rtf` | latency / audio duration; below 1.0 is faster than realtime |
+| `load_ms` | one-off model load, measured separately from inference |
+| `backend` | `parakeet.cpp` or `stub` |
+
+Report RTF with the thread count and hardware stated. A number from a many-core
+cloud box is not the number a "lightweight local runtime" delivers on a laptop,
+so pin threads (4-8) or take finals on the target hardware.
+
+## Benchmark
+
+Thread-pinned, end-to-end (mel + encoder + decode); the one-off model load
+(~0.41 s) is measured separately and excluded. `q8_0` model, GCP
+`n2-standard-16` (Cascade Lake), via `parakeet-cli bench` from a standalone
+`parakeet.cpp` build (the bundled install does not build the CLI).
+
+| threads | RTF, English (7.4 s) | RTF, German (12 s) |
+|--------:|:--------------------:|:------------------:|
+|       1 |         0.27         |        0.28        |
+|       2 |         0.15         |        0.15        |
+|       4 |        0.083         |       0.082        |
+|       8 |        0.049         |       0.048        |
+
+RTF is transcription time / audio duration; below 1.0 is faster than realtime.
+Even a single core runs ~3.6x faster than realtime, so this holds comfortably
+real-time on a laptop — pin threads (or state the hardware) when you quote a
+number, since a many-core box flatters it.
+
+## Test
+
+```bash
+pip install -e '.[test]'
+pytest                                    # native build; model-dependent tests skip
+PARAKEET_MODEL=~/parakeet-v3-q8.gguf pytest   # runs the full native tier
+```
+
+## Reproduce from a clean clone
+
+```bash
+git clone <repo-url> && cd hackathon-parakeet-stt/package
+python -m venv .venv && . .venv/bin/activate
+pip install -e '.[test]'
+pytest
+parakeet info
+```
