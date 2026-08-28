@@ -40,17 +40,37 @@ The same Python surface sits on top of two backends:
   package, CLI, tests, and packaging work before the native engine is wired in.
 - **native** links `parakeet.cpp` and runs real inference.
 
-Build native by pointing the build at a `parakeet.cpp` source tree and its
-built shared library:
+### Build native from the provided model
+
+Three scripts take a clean checkout to a working native install. Run them from
+`package/` (Linux; needs a C++17 compiler, CMake, and — for the conversion —
+enough disk for the NeMo/torch toolchain):
 
 ```bash
-pip install . \
-  --config-settings=cmake.define.PARAKEET_ROOT=/opt/parakeet.cpp \
-  --config-settings=cmake.define.PARAKEET_LIB=/opt/parakeet.cpp/build-shared/libparakeet.so
+# 1. build parakeet.cpp at the pinned commit and link the shared library
+scripts/build_native_lib.sh ~/parakeet.cpp ~/parakeet.cpp/native
+
+# 2. convert the PROVIDED .nemo into a GGUF that loads on that build
+#    (first: git lfs pull --include='parakeet-tdt-0.6b-v3.nemo')
+scripts/build_model.sh ../parakeet-tdt-0.6b-v3.nemo ~/parakeet-v3-q8.gguf ~/parakeet.cpp
+
+# 3. reinstall the package against the native backend
+scripts/wire_native.sh ~/parakeet.cpp ~/parakeet.cpp/native/libparakeet.so
+
+parakeet info                 # -> "backend": "parakeet.cpp"
+PARAKEET_MODEL=~/parakeet-v3-q8.gguf pytest
 ```
 
-`scripts/wire_native.sh` does this end to end on a machine that already has the
-source and the library.
+Under the hood step 3 is just `pip install .` with
+`--config-settings=cmake.define.PARAKEET_ROOT=… PARAKEET_LIB=…`; the script adds
+the rpath so the extension resolves the library at import.
+
+> **On the provided `.gguf`.** The `parakeet-tdt-0.6b-v3.q8_0.gguf` committed at
+> the repo root is NVIDIA's upstream GGUF. parakeet.cpp's GGUF schema has moved
+> since it was published, so it does **not** load on the pinned build.
+> `build_model.sh` regenerates a matching GGUF from the provided `.nemo` — same
+> weights, converter and runtime in lockstep — so point `-m` / `PARAKEET_MODEL`
+> at that regenerated file, not the committed one.
 
 ## Use
 
@@ -85,6 +105,24 @@ Every `transcribe()` returns the transcript together with:
 Report RTF with the thread count and hardware stated. A number from a many-core
 cloud box is not the number a "lightweight local runtime" delivers on a laptop,
 so pin threads (4-8) or take finals on the target hardware.
+
+## Benchmark
+
+Thread-pinned, end-to-end (mel + encoder + decode); the one-off model load
+(~0.41 s) is measured separately and excluded. `q8_0` model, GCP
+`n2-standard-16` (Cascade Lake), via `parakeet-cli bench`.
+
+| threads | RTF, English (7.4 s) | RTF, German (12 s) |
+|--------:|:--------------------:|:------------------:|
+|       1 |         0.27         |        0.28        |
+|       2 |         0.15         |        0.15        |
+|       4 |        0.083         |       0.082        |
+|       8 |        0.049         |       0.048        |
+
+RTF is transcription time / audio duration; below 1.0 is faster than realtime.
+Even a single core runs ~3.6x faster than realtime, so this holds comfortably
+real-time on a laptop — pin threads (or state the hardware) when you quote a
+number, since a many-core box flatters it.
 
 ## Test
 
