@@ -1,0 +1,20 @@
+# build output
+build/
+dist/
+*.egg-info/
+_skbuild/
+__pycache__/
+*.so
+*.pyd
+
+# models and audio (never commit weights)
+*.gguf
+*.nemo
+*.mp3
+*.wav
+!tests/fixtures/*.wav
+
+# env
+.venv/
+venv/
+.pytest_cache/
