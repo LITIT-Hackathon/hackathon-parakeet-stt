@@ -54,6 +54,42 @@ jobs:
       - name: Test
         run: pytest -q
 
+  native-model:
+    # Proves native inference end to end: build from source, fetch the release
+    # model once (cached across runs), run the full native tier -- the tests
+    # that are @needs_model and otherwise only ever run by hand.
+    runs-on: ubuntu-latest
+    env:
+      PARAKEET_CACHE_DIR: ${{ github.workspace }}/pk-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[test]'
+
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/pk-cache
+          # bump when the registry model changes
+          key: parakeet-model-models-v1-q8_0
+
+      - name: Fetch model if not cached
+        run: parakeet download-model      # instant marker check on a cache hit
+
+      - name: Native tier
+        run: |
+          PARAKEET_MODEL="$PARAKEET_CACHE_DIR/models/parakeet-tdt-0.6b-v3.q8_0.gguf" \
+            pytest -q
+
   stub:
     # The stub still has to build and pass on its own -- it is the offline / no
     # C++ engine path and the fallback if the fetch is unavailable. Also the
