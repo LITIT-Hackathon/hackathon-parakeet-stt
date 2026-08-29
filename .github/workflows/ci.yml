@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -55,8 +55,9 @@ jobs:
         run: pytest -q
 
   stub:
-    # The stub still has to build and pass on its own — it is the offline / no
-    # C++ engine path and the fallback if the fetch is unavailable.
+    # The stub still has to build and pass on its own -- it is the offline / no
+    # C++ engine path and the fallback if the fetch is unavailable. Also the
+    # cheapest place to check the built wheel's metadata and contents.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +72,12 @@ jobs:
           pip install -e '.[test]' --config-settings=cmake.define.PARAKEET_STT_BUNDLED=OFF
           parakeet info | python -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if not d['native'] else 'expected stub')"
           pytest -q
+      - name: Wheel metadata and contents
+        run: |
+          pip install --upgrade build twine
+          python -m build --wheel --config-setting=cmake.define.PARAKEET_STT_BUNDLED=OFF
+          twine check dist/*
+          python -c "import glob,zipfile,sys; w=glob.glob('dist/parakeet_stt-*.whl')[0]; ns=zipfile.ZipFile(w).namelist(); sys.exit(0 if any(n.endswith('parakeet_stt/py.typed') for n in ns) else 'py.typed missing from wheel: '+w)"
 
   clean-room:
     # The reproducibility deliverable, checked the way a judge would: from a

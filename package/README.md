@@ -17,7 +17,10 @@ print(result.rtf, result.latency_ms)      # runtime metrics come with the transc
 
 ## Install
 
-Needs a C++17 compiler, CMake ≥ 3.20, and (on the first build) network access.
+Linux x86_64 for now. The native engine is compiled from source, so a build
+needs a C++17 compiler, CMake ≥ 3.20, and (on the first build) network access.
+Prebuilt wheels, macOS, and Windows are future work; see
+[Known limitations](#known-limitations).
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -173,3 +176,14 @@ pip install -e '.[test]'
 pytest
 parakeet info
 ```
+
+## Known limitations
+
+- **Linux x86_64 only.** The extension is built from source; there are no
+  prebuilt wheels yet, and the macOS / Windows build paths are untested.
+- **Model is fetched, not bundled.** ~940 MB on first use, from a GitHub release
+  asset. `PARAKEET_CACHE_DIR` relocates the cache; `Model(..., download=False)`
+  refuses to fetch.
+- **CPU only.** No CUDA / Metal / Vulkan.
+- **Batch of one.** No batched or streaming transcription; word-level timestamps
+  are not surfaced yet (the C-API returns them).

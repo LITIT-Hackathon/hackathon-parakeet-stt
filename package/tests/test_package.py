@@ -3,20 +3,21 @@ two backend flags agree."""
 
 from __future__ import annotations
 
-from importlib.metadata import version as _dist_version
+import re
 
 import parakeet_stt
 
-
-def test_version_is_a_nonempty_string():
-    assert isinstance(parakeet_stt.__version__, str)
-    assert parakeet_stt.__version__
+# Loose PEP 440: N(.N)*  with optional pre/post/dev/local suffixes.
+_PEP440 = re.compile(r"^\d+(\.\d+)*([abc]|rc|\.post|\.dev)?\d*(\+[a-z0-9.]+)?$", re.I)
 
 
-def test_version_matches_package_metadata():
-    # __init__.__version__ and pyproject's version are two hand-maintained
-    # sources; guard against them drifting apart.
-    assert parakeet_stt.__version__ == _dist_version("parakeet-stt")
+def test_version_is_a_resolved_pep440_string():
+    v = parakeet_stt.__version__
+    assert isinstance(v, str) and v
+    # __version__ is read from installed metadata; the source-tree fallback
+    # should never be what an installed package reports.
+    assert v != "0.0.0+unknown", "package metadata was not found at import"
+    assert _PEP440.match(v), v
 
 
 def test_all_exports_are_importable():
