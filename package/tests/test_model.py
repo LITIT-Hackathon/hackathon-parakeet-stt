@@ -9,7 +9,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import RESULT_FIELDS, native_only, needs_model, stub_only
+from conftest import (
+    MODEL,
+    RESULT_FIELDS,
+    SPEECH_EN,
+    native_only,
+    needs_model,
+    stub_only,
+)
 
 from parakeet_stt import Model, Result
 from parakeet_stt.audio import TARGET_SAMPLE_RATE
@@ -111,6 +118,38 @@ def test_use_after_close_raises(stub_or_real_model):
         m.transcribe_pcm(np.zeros(1600, np.float32))
 
 
+def test_two_models_are_independent(model_and_audio):
+    model, audio = model_and_audio
+    a = Model(model)
+    b = Model(model)
+    try:
+        assert isinstance(a.transcribe(audio), Result)
+        assert isinstance(b.transcribe(audio), Result)
+        a.close()
+        # closing one instance must not disturb the other
+        assert isinstance(b.transcribe(audio), Result)
+    finally:
+        a.close()
+        b.close()
+
+
+@native_only
+@needs_model
+def test_repeated_open_close_does_not_leak(stub_or_real_model):
+    # ~940 MB per model; a native ctx that isn't freed on close() balloons RSS.
+    def rss_kib() -> int:
+        with open("/proc/self/statm") as f:
+            return int(f.read().split()[1]) * 4  # resident pages -> KiB
+
+    for _ in range(3):  # warm the allocator / file mmap
+        Model(stub_or_real_model).close()
+    base = rss_kib()
+    for _ in range(8):
+        Model(stub_or_real_model).close()
+    grew = rss_kib() - base
+    assert grew < 200_000, f"RSS grew {grew} KiB over 8 open/close cycles"
+
+
 @stub_only
 def test_transcribe_resamples_wav_end_to_end(stub_or_real_model, write_wav):
     # Model.transcribe reads and resamples the file before inference; a 44.1 kHz
@@ -139,3 +178,29 @@ def test_zero_length_pcm_does_not_crash_native(stub_or_real_model):
             return
         assert isinstance(r, Result)
         assert r.audio_s == 0.0
+
+
+# -- word timestamps -------------------------------------------------------
+
+@stub_only
+def test_words_are_empty_on_stub(stub_or_real_model):
+    with Model(stub_or_real_model) as m:
+        r = m.transcribe_pcm(np.zeros(1600, np.float32))
+    assert r.words == ()
+
+
+@native_only
+@needs_model
+def test_native_words_have_monotonic_timestamps():
+    with Model(MODEL) as m:
+        r = m.transcribe(SPEECH_EN)
+    assert r.words, "native transcription returned no word timestamps"
+    prev_end = 0.0
+    for w in r.words:
+        assert w.text
+        assert 0.0 <= w.start <= w.end, (w.text, w.start, w.end)
+        assert w.start >= prev_end - 1e-3, f"words overlap at {w.text!r}"
+        assert 0.0 < w.conf <= 1.0, (w.text, w.conf)
+        prev_end = w.end
+    joined = " ".join(w.text for w in r.words).lower()
+    assert "portrait" in joined  # words should reconstruct the transcript

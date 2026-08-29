@@ -26,7 +26,7 @@ SPEECH_DE = FIXTURES / "speech_de.wav"
 MODEL = os.environ.get("PARAKEET_MODEL")
 NATIVE = parakeet_stt.is_native()
 
-RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "load_ms"}
+RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "words", "load_ms"}
 
 needs_model = pytest.mark.skipif(
     not MODEL, reason="set PARAKEET_MODEL to run the native tier"

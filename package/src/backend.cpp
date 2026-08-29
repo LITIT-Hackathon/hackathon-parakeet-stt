@@ -8,6 +8,11 @@
 // The stub lets the package build, install, test and demo with no engine and
 // no model. Both expose the identical Python surface, so switching is a CMake
 // flag, never a code change upstream of here.
+//
+// transcribe_pcm returns a JSON document (a one-element array), not a bare
+// string: the *_json C-API entry point yields per-word timestamps and
+// confidence at no extra decode cost, so the Python layer gets both the
+// transcript and the word spans from one call.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -50,29 +55,12 @@ public:
 #endif
     }
 
-    // Transcribe a 16 kHz mono WAV file already validated on the Python side.
-    std::string transcribe_file(const std::string& wav_path) {
-#ifdef PARAKEET_NATIVE
-        require_open();
-        // The GIL is released for the whole decode: inference is long and
-        // holds no Python objects, so keeping it would stall every other
-        // thread in the process for the duration.
-        char* out = nullptr;
-        {
-            py::gil_scoped_release release;
-            out = parakeet_capi_transcribe_path(ctx_, wav_path.c_str(), 0);
-        }
-        return take(out);
-#else
-        (void)wav_path;
-        return stub_text();
-#endif
-    }
-
-    // Transcribe mono float32 PCM in [-1, 1]. The array is taken by buffer,
-    // c_style + forcecast, so a contiguous float32 numpy array passes straight
-    // through with no copy; anything else is coerced once by pybind rather than
-    // round-tripped through a Python list.
+    // Transcribe mono float32 PCM in [-1, 1]. Returns a JSON document:
+    //   [{"text": "...", "frame_sec": F,
+    //     "words":  [{"w": "...", "start": S, "end": E, "conf": C}, ...],
+    //     "tokens": [...]}]
+    // The array has one element (this is the batch entry point called with
+    // n_clips = 1). The Python layer parses text + words out of it.
     std::string transcribe_pcm(
         py::array_t<float, py::array::c_style | py::array::forcecast> pcm,
         int sample_rate) {
@@ -83,14 +71,16 @@ public:
         const int n = static_cast<int>(buf.size);
         char* out = nullptr;
         {
+            // Long, holds no Python objects: release the GIL for the decode.
             py::gil_scoped_release release;
-            out = parakeet_capi_transcribe_pcm(ctx_, data, n, sample_rate, 0);
+            out = parakeet_capi_transcribe_pcm_batch_json(
+                ctx_, data, &n, /*n_clips=*/1, sample_rate, /*decoder=*/0);
         }
         return take(out);
 #else
         (void)pcm;
         (void)sample_rate;
-        return stub_text();
+        return stub_json();
 #endif
     }
 
@@ -131,9 +121,10 @@ private:
         return s;
     }
 #else
-    static std::string stub_text() {
-        return "[stub backend] the package is wired end to end; "
-               "reinstall with the default bundled build for real inference";
+    static std::string stub_json() {
+        return R"([{"text":"[stub backend] the package is wired end to end; )"
+               R"(reinstall with the default bundled build for real inference",)"
+               R"("frame_sec":0.08,"words":[],"tokens":[]}])";
     }
 #endif
 };
@@ -150,7 +141,6 @@ PYBIND11_MODULE(_core, m) {
 
     py::class_<Backend>(m, "Backend")
         .def(py::init<const std::string&>(), py::arg("model_path"))
-        .def("transcribe_file", &Backend::transcribe_file, py::arg("wav_path"))
         .def("transcribe_pcm", &Backend::transcribe_pcm,
              py::arg("pcm"), py::arg("sample_rate"))
         .def("close", &Backend::close);

@@ -125,6 +125,7 @@ def test_json_output_has_the_full_contract(model_and_audio):
     assert out.returncode == 0, out.stderr
     payload = json.loads(out.stdout)
     assert set(payload) == {
-        "text", "audio_s", "latency_ms", "rtf", "model", "backend", "load_ms"
+        "text", "audio_s", "latency_ms", "rtf", "model", "backend", "words", "load_ms"
     }
     assert payload["text"].strip()
+    assert isinstance(payload["words"], list)

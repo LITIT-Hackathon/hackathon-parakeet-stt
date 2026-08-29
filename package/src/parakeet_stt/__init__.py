@@ -5,7 +5,7 @@ from importlib.metadata import version as _pkg_version
 
 from ._core import backend_name, is_native
 from .audio import AudioError, read_wav_mono
-from .model import Model, Result
+from .model import Model, Result, Word
 from .models import DEFAULT_MODEL, ModelError, download_model, list_models
 
 try:  # single source of truth is the version in pyproject.toml
@@ -16,6 +16,7 @@ except PackageNotFoundError:  # running from a source tree, not installed
 __all__ = [
     "Model",
     "Result",
+    "Word",
     "AudioError",
     "ModelError",
     "read_wav_mono",
