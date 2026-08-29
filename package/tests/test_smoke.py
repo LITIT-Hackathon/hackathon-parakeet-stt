@@ -44,7 +44,7 @@ needs_model = pytest.mark.skipif(
 )
 native_only = pytest.mark.skipif(not NATIVE, reason="native backend only")
 
-RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "load_ms"}
+RESULT_FIELDS = {"text", "audio_s", "latency_ms", "rtf", "model", "backend", "words", "load_ms"}
 
 
 @pytest.fixture

@@ -1,11 +1,8 @@
-"""The public API: Model.transcribe(wav) -> Result.
-
-This is the contract both tracks build against. Track A supplies the native
-backend behind it; nothing above this file changes when the stub is replaced.
-"""
+"""The public API: Model.transcribe(wav) -> Result."""
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -18,16 +15,27 @@ from .models import DEFAULT_MODEL, resolve
 
 
 @dataclass(frozen=True)
+class Word:
+    """One recognised word with its span and confidence."""
+
+    text: str            # the word as transcribed
+    start: float          # seconds from the start of the audio
+    end: float            # seconds; >= start
+    conf: float           # confidence in (0, 1]
+
+
+@dataclass(frozen=True)
 class Result:
-    """A transcript plus the runtime metrics the brief asks us to report."""
+    """A transcript plus per-word timing and the runtime metrics."""
 
     text: str
-    audio_s: float          # length of the input audio
-    latency_ms: float       # wall clock for the transcription call alone
-    rtf: float              # latency / audio duration; < 1.0 is faster than realtime
-    model: str              # model filename
-    backend: str            # "parakeet.cpp" or "stub"
-    load_ms: float = 0.0    # one-off model load, kept separate from inference
+    audio_s: float                     # length of the input audio
+    latency_ms: float                  # wall clock for the transcription call alone
+    rtf: float                         # latency / audio duration; < 1.0 is realtime+
+    model: str                         # model filename
+    backend: str                       # "parakeet.cpp" or "stub"
+    words: tuple[Word, ...] = ()        # empty on the stub backend
+    load_ms: float = 0.0               # one-off model load, separate from inference
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -66,10 +74,10 @@ class Model:
         audio_s = duration_seconds(samples, sample_rate)
 
         t0 = time.perf_counter()
-        text = self._backend.transcribe_pcm(samples, sample_rate)
+        doc = self._backend.transcribe_pcm(samples, sample_rate)
         latency_s = time.perf_counter() - t0
 
-        return self._result(text, audio_s, latency_s, Path(wav_path).name)
+        return self._result(doc, audio_s, latency_s)
 
     def transcribe_pcm(self, samples, sample_rate: int = TARGET_SAMPLE_RATE) -> Result:
         """Transcribe raw mono float32 PCM in [-1, 1]."""
@@ -82,10 +90,10 @@ class Model:
         audio_s = duration_seconds(arr, sample_rate)
 
         t0 = time.perf_counter()
-        text = self._backend.transcribe_pcm(arr, sample_rate)
+        doc = self._backend.transcribe_pcm(arr, sample_rate)
         latency_s = time.perf_counter() - t0
 
-        return self._result(text, audio_s, latency_s, "<pcm>")
+        return self._result(doc, audio_s, latency_s)
 
     def close(self) -> None:
         backend = getattr(self, "_backend", None)
@@ -100,13 +108,22 @@ class Model:
 
     # -- internals ----------------------------------------------------------
 
-    def _result(self, text: str, audio_s: float, latency_s: float, label: str) -> Result:
+    def _result(self, doc: str, audio_s: float, latency_s: float) -> Result:
+        # The backend returns a one-element JSON array (batch entry point,
+        # n_clips = 1); the stub returns the same shape with an empty word list.
+        clips = json.loads(doc)
+        clip = clips[0] if isinstance(clips, list) else clips
+        words = tuple(
+            Word(text=w["w"], start=w["start"], end=w["end"], conf=w["conf"])
+            for w in clip.get("words", ())
+        )
         return Result(
-            text=text.strip(),
+            text=str(clip.get("text", "")).strip(),
             audio_s=round(audio_s, 3),
             latency_ms=round(latency_s * 1000.0, 1),
             rtf=round(latency_s / audio_s, 4) if audio_s > 0 else 0.0,
             model=Path(self.model_path).name,
             backend=_core.backend_name(),
+            words=words,
             load_ms=round(self.load_ms, 1),
         )

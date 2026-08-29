@@ -124,17 +124,22 @@ Any sample rate or channel count is accepted; input is normalised to 16 kHz
 mono before inference. Feeding the wrong rate is the classic silent failure, so
 that conversion is done for you and not left to the caller.
 
-## Metrics
+## Metrics and word timings
 
-Every `transcribe()` returns the transcript together with:
+Every `transcribe()` returns a `Result`:
 
 | field | meaning |
 |---|---|
+| `text` | the full transcript |
+| `words` | tuple of `Word(text, start, end, conf)` -- per-word spans in seconds and confidence in (0, 1]; empty on the stub backend |
 | `audio_s` | length of the input audio in seconds |
 | `latency_ms` | wall clock for the transcription call alone |
 | `rtf` | latency / audio duration; below 1.0 is faster than realtime |
 | `load_ms` | one-off model load, measured separately from inference |
 | `backend` | `parakeet.cpp` or `stub` |
+
+`parakeet transcribe a.wav --json` emits all of it, `words` as a list of
+`{"text","start","end","conf"}`.
 
 Report RTF with the thread count and hardware stated. A number from a many-core
 cloud box is not the number a "lightweight local runtime" delivers on a laptop,
@@ -185,5 +190,5 @@ parakeet info
   asset. `PARAKEET_CACHE_DIR` relocates the cache; `Model(..., download=False)`
   refuses to fetch.
 - **CPU only.** No CUDA / Metal / Vulkan.
-- **Batch of one.** No batched or streaming transcription; word-level timestamps
-  are not surfaced yet (the C-API returns them).
+- **Batch of one.** No batched or streaming transcription API (the engine has a
+  batch path; the package calls it with one clip).
