@@ -46,6 +46,17 @@ already cached, so `download-model` is optional — see [Model](#model).
 | `PARAKEET_STT_GIT_TAG=<sha>` | vendor a different `parakeet.cpp` commit |
 | `FETCHCONTENT_SOURCE_DIR_PARAKEET_CPP=<path>` | use a local `parakeet.cpp` checkout, skip the clone (offline) |
 
+## Demo
+
+`scripts/demo.sh` runs the whole deliverable end to end on the bundled fixtures
+— install check, native backend, `model.transcribe()` with word timings, CLI
+metrics, English **and** German, and the smoke test:
+
+```bash
+scripts/demo.sh            # fetches the default model on first run
+scripts/demo.sh my.gguf    # or point it at a local model
+```
+
 ## Backends
 
 The same Python surface sits on two backends, chosen at build time:
@@ -185,7 +196,8 @@ parakeet info
 ## Known limitations
 
 - **Linux x86_64 only.** The extension is built from source; there are no
-  prebuilt wheels yet, and the macOS / Windows build paths are untested.
+  prebuilt wheels yet, and the macOS / Windows build paths are untested. On
+  Windows, run inside **WSL** (Ubuntu) — it is Linux, so everything here works.
 - **Model is fetched, not bundled.** ~940 MB on first use, from a GitHub release
   asset. `PARAKEET_CACHE_DIR` relocates the cache; `Model(..., download=False)`
   refuses to fetch.
