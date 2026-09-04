@@ -4,6 +4,10 @@ Build a lightweight local Speech-to-Text runtime around NVIDIA Parakeet,
 using a native C++ inference core and exposing the result as a simple,
 installable Python library.
 
+## Presentation
+
+[![View on Figma](https://img.shields.io/badge/Figma-Presentation-a259ff?logo=figma&logoColor=white)](https://www.figma.com/deck/wQH7IdCeAYWV86n7YwwIoo)
+
 ## MVP
 
 Your solution should:
